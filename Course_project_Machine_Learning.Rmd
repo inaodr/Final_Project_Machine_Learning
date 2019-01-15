@@ -1,0 +1,110 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Inaki Odriozola"
+date: "14 January 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary
+
+This work aims at predicting if people are doing barble lifts correctly using data from accelerometers on the belt, forearm, arm, and dumbell. The dataset (Velloso et al. 2013) consists of measures on 6 individuals that were asked to do barble lifts correctly and incorrectly in five different ways. Part of the dataset (training set) will be used to train the models to be used to predict correctness of the lifts in the other part of the dataset (testing set).
+
+# Load, explore and preprocess the data
+
+## Loading the data and dividing into training and testing sets
+
+```{r,results='hide'}
+setwd("D:/APUNTEAK/Coursera/DATA_SCIENCE/8.Practical machine learning/Project")
+```
+
+Following code loads the training dataset to R and it further divides into a training dataset and testing dataset. Only the training data after the subdivision will be used to train the model, and, the testing data will be used just to check our final model and see the expected peformance of the model in the definitive testing set. 
+
+```{r}
+dataset<-read.csv("pml-training.csv",row.names = 1,header=TRUE)
+library(caret)
+inTrain<-createDataPartition(y=dataset$classe,
+                              p=0.75,list=FALSE)
+training<-dataset[inTrain,]
+testing<-dataset[-inTrain,]
+```
+
+## Exploring the dataset
+What is the proportion of NAs in each variable?
+
+```{r}
+table(apply(apply(training,2,is.na),2,mean))
+```
+
+There are 92 variables with no NAs and 67 variables with above 97% NAs. I will remove all variables that have NAs.
+
+```{r}
+training<-training[,apply(apply(training,2,is.na),2,mean)<0.95]
+```
+
+The name of the participant and the time variables will be removed as well, as they are not generalizable features to the general public. Hence, using them to train the model would lead to overfitting.
+
+```{r}
+training<-training[,-c(1:4)]
+```
+
+Variables without variation are likely poor predictors so they will be identified and removed.
+
+```{r}
+nvs<-nearZeroVar(training,saveMetrics = TRUE)
+training<-training[,!nvs$nzv]
+```
+
+After all that filtering a dataset with 55 variables remains. Lets check collinearities between predictors. To to so, I'll check the amount of principal components required to capture 80% of the variation in the dataset.
+
+```{r}
+summary(prcomp(training[,-c(length(training))]))$importance[,1:5]
+```
+
+14 principal components capture above 80% of variation. 
+
+## Preprocess the data
+
+I will create a preProcess object that extracts principal components from dataset. If it has similar efficiency as raw explanatory data for prediction, this will be used, since it reduces the dataset of 55 variables to just five retaining 80% of the variability. 
+
+```{r}
+train_preProcessPCA<-preProcess(training[,-c(length(training))],method = "pca",thresh = .8)
+```
+
+# Build the predictive model
+
+Random Forest algorithm will be used for prediction. The model will be fitted using k-fold cross-validation. First using the principal components. 
+
+```{r}
+PC_extract_train<-predict(train_preProcessPCA,training)
+library(randomForest)
+RF_PCA<-rfcv(PC_extract_train[,-1],training$classe,cv.fold=5)
+with(RF_PCA, plot(n.var, error.cv, log="x", type="o", lwd=2))
+```
+
+Since the cross-validation error is low with just 14 components, the model based on PCA will be used as final model. Lets fit it.
+
+```{r}
+modelFit_PCA_Train<-train(classe~.,method="rf",data=PC_extract_train,prox=TRUE)
+```
+
+# Expected out of the sample error
+
+Expected out of the sample error will be measured by applying our model to the testing set we divided in the beginning. This is an approximation to the model performance in the final QUIZ testing set.
+
+```{r}
+PC_extract_test<-predict(train_preProcessPCA,testing)
+confusionMatrix(testing$classe,predict(modelFit_PCA_Train,PC_extract_test))
+```
+
+Above, the expected accuracy and error values of my model.
+
+# Bibliography
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
